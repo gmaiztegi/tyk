@@ -17,31 +17,47 @@ import (
 )
 
 func TestGraphQLConfigAdapter_EngineConfigV2(t *testing.T) {
-	run := func(t *testing.T, inputJSON string, httpClient *http.Client) (*graphql.EngineV2Configuration, error) {
+	run := func(t *testing.T, inputJSON string, httpClient *http.Client) (*graphql.EngineV2Configuration, error, plan.FieldConfigurations, []plan.DataSourceConfiguration) {
 		var gqlConfig apidef.GraphQLConfig
 		err := json.Unmarshal([]byte(inputJSON), &gqlConfig)
 		require.NoError(t, err)
 
 		adapter := NewGraphQLConfigAdapter(gqlConfig)
 		adapter.SetHttpClient(httpClient)
-		return adapter.EngineConfigV2()
+
+		cfg, err := adapter.EngineConfigV2()
+		if err != nil {
+			return cfg, err, nil, nil
+		}
+
+		fieldCfgs := adapter.engineConfigV2FieldConfigs()
+		dataSources, _ := adapter.engineConfigV2DataSources()
+
+		return cfg, err, fieldCfgs, dataSources
 	}
 
 	runWithError := func(inputJSON string, expectedErr error) func(t *testing.T) {
 		return func(t *testing.T) {
-			_, err := run(t, inputJSON, nil)
+			_, err, _, _ := run(t, inputJSON, nil)
 			assert.Error(t, err)
 			assert.Equal(t, expectedErr, err)
 		}
 	}
 
-	runWithoutError := func(inputJSON string, httpClient *http.Client, expectedEngineV2ConfigBuilder func(t *testing.T) *graphql.EngineV2Configuration) func(t *testing.T) {
+	runWithoutError := func(inputJSON string, httpClient *http.Client, expectedEngineV2ConfigBuilder func(t *testing.T) (*graphql.EngineV2Configuration, plan.FieldConfigurations, []plan.DataSourceConfiguration)) func(t *testing.T) {
 		return func(t *testing.T) {
-			engineV2Conf, err := run(t, inputJSON, httpClient)
-			expectedEngineV2Config := expectedEngineV2ConfigBuilder(t)
+			engineV2Conf, err, actualFieldCfgs, actualDataSources := run(t, inputJSON, httpClient)
+			expectedEngineV2Config, expectedFieldCfgs, expectedDataSources := expectedEngineV2ConfigBuilder(t)
 
 			assert.NoError(t, err)
-			assert.Equal(t, expectedEngineV2Config, engineV2Conf)
+
+			if assert.ObjectsAreEqual(expectedEngineV2Config, engineV2Conf) {
+				return
+			}
+
+			// sometimes array order could be different need to check elements match
+			assert.ElementsMatch(t, expectedFieldCfgs, actualFieldCfgs)
+			assert.ElementsMatch(t, expectedDataSources, actualDataSources)
 		}
 	}
 
@@ -53,12 +69,12 @@ func TestGraphQLConfigAdapter_EngineConfigV2(t *testing.T) {
 
 	t.Run("should convert graphql v2 config to engine config v2",
 		runWithoutError(graphqlEngineV2ConfigJson, httpClient,
-			func(t *testing.T) *graphql.EngineV2Configuration {
+			func(t *testing.T) (*graphql.EngineV2Configuration, plan.FieldConfigurations, []plan.DataSourceConfiguration) {
 				schema, err := graphql.NewSchemaFromString(v2Schema)
 				require.NoError(t, err)
 
 				conf := graphql.NewEngineV2Configuration(schema)
-				conf.SetFieldConfigurations(plan.FieldConfigurations{
+				fieldConfigs := plan.FieldConfigurations{
 					{
 						TypeName:              "Query",
 						FieldName:             "rest",
@@ -89,9 +105,10 @@ func TestGraphQLConfigAdapter_EngineConfigV2(t *testing.T) {
 							},
 						},
 					},
-				})
+				}
+				conf.SetFieldConfigurations(fieldConfigs)
 
-				conf.SetDataSources([]plan.DataSourceConfiguration{
+				dataSources := []plan.DataSourceConfiguration{
 					{
 						RootNodes: []plan.TypeField{
 							{
@@ -221,9 +238,10 @@ func TestGraphQLConfigAdapter_EngineConfigV2(t *testing.T) {
 							},
 						}),
 					},
-				})
+				}
+				conf.SetDataSources(dataSources)
 
-				return &conf
+				return &conf, fieldConfigs, dataSources
 			},
 		),
 	)
