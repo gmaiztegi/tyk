@@ -120,12 +120,11 @@ func TestGoPluginResponseHook(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	t.Run("Run Go-plugin all middle-wares", func(t *testing.T) {
+	t.Run("Run Go-plugin response middleware", func(t *testing.T) {
 		ts.Run(t, []test.TestCase{
 			{
-				Path:    "/goplugin/plugin_hit",
-				Headers: map[string]string{"Authorization": "abc"},
-				Code:    http.StatusOK,
+				Path: "/goplugin/plugin_hit",
+				Code: http.StatusOK,
 				HeadersMatch: map[string]string{
 					"X-Response-Added": "resp-added",
 				},
